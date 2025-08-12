@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { readFileSync } from 'fs'
 
 
 const hash = (...values) => createHash("sha256").update(Buffer.concat(values.map(fromHex))).digest()
@@ -76,6 +77,13 @@ class Node {
     get avg_time() {
         return (this.req_count ? this.req_time / this.req_count : 0).toFixed(2) + ' ms'
     }
+    get is_file() {
+        return !this.url.startsWith('http://') && !this.url.startsWith('https://')
+    }
+    get file_content() {
+        if (!this.is_file) throw new Error('Not a file')
+        return Buffer.from(readFileSync(this.url))
+    }
 
 }
 
@@ -112,7 +120,7 @@ async function historical_proof(node) {
 async function check_lcu_json(node) {
     const slot = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header.message.slot)
     const period = slot >> 13
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 21; i++) {
         const data = await node.json('/eth/v1/beacon/light_client/updates', { start_period: period - i, count: 1 }).then(r => r[0].data)
         const sync_root = calculate_next_sync_committee_root(data.next_sync_committee)
         const state_root_calculated = merkle_root_from_branch(ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX, data.next_sync_committee_branch, sync_root) // we only check electra states
@@ -125,9 +133,15 @@ async function check_lcu_json(node) {
     return 'ok'
 }
 async function check_lcu_ssz(node) {
-    const slot = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header.message.slot)
-    const period = slot >> 13
-    const data = await node.ssz('/eth/v1/beacon/light_client/updates', { start_period: period, count: 1 }).then(r => Buffer.from(r))
+    let data = null
+    if (node.is_file)
+        data = node.file_content
+
+    if (!data) {
+        const slot = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header.message.slot)
+        const period = slot >> 13
+        data = await node.ssz('/eth/v1/beacon/light_client/updates', { start_period: period, count: 1 }).then(r => Buffer.from(r))
+    }
 
     function decode_ssz(data) {
         function read_ssz(bytes, len) {
@@ -168,7 +182,9 @@ async function check_lcu_ssz(node) {
 export async function check_node(url, cb) {
     const node = new Node(url)
     const results = []
-    const checks = [
+    const checks = node.is_file ? [
+        { name: 'light_client_update as ssz', fn: check_lcu_ssz, required: true },
+    ] : [
         { name: 'version', fn: check_version, required: true },
         { name: 'headers_by_parent', fn: check_parent_headers, required: true },
         { name: 'block_as_ssz', fn: check_block_ssz, required: false },
