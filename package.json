@@ -1,0 +1,24 @@
+{
+  "name": "node_check",
+  "version": "1.0.0",
+  "description": "checker script to test features of beacon and rpc-nodes",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/corpus-core/node_check.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/corpus-core/node_check/issues"
+  },
+  "homepage": "https://github.com/corpus-core/node_check#readme",
+  "dependencies": {
+    "express": "^5.1.0",
+    "http-server": "^14.1.1"
+  }
+}

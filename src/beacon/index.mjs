@@ -1,187 +1,258 @@
-import { createHash } from 'crypto'
-import { readFileSync } from 'fs'
+// Isomorphic environment setup
+const isBrowser = typeof window !== 'undefined';
 
+let crypto, fs, Buffer;
 
-const hash = (...values) => createHash("sha256").update(Buffer.concat(values.map(fromHex))).digest()
-const hash_roots = (roots) => new Array(roots.length / 2).fill(0).map((_, i) => hash(roots[i * 2], (roots[i * 2 + 1] || Buffer.alloc(32))))
-const hash_key = (key) => hash(key, Buffer.alloc(16))
-const fromHex = (hex) => Buffer.isBuffer(hex) ? hex : Buffer.from(hex.replace("0x", ""), "hex")
-const split_bytes = (bytes, len) => new Array(bytes.length / len).fill(0).map((_, i) => bytes.slice(i * len, (i + 1) * len))
-const ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX = 87 // used to be 55 before electra
+if (isBrowser) {
+    crypto = window.crypto;
+    Buffer = Uint8Array;
+} else {
+    // Using dynamic import for Node.js modules
+    await (async () => {
+        crypto = (await import('crypto')).default;
+        fs = (await import('fs')).default;
+        Buffer = (await import('buffer')).Buffer;
+    })();
+}
 
-function calculate_next_sync_committee_root(next_sync_committee) {
-    let roots = next_sync_committee.pubkeys.map(hash_key) // adding 16 bytes of padding
-    while (roots.length > 1) roots = hash_roots(roots)
-    return hash(roots[0], hash_key(next_sync_committee.aggregate_pubkey))
+// --- Helper functions ---
+
+const hash = async (...values) => {
+    const data = isBrowser ? concat_buffers(values.map(v => fromHex(v))) : Buffer.concat(values.map(v => fromHex(v)));
+    if (isBrowser) {
+        return new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+    } else {
+        return crypto.createHash("sha256").update(data).digest();
+    }
+};
+
+const hash_roots = async (roots) => {
+    const results = [];
+    for (let i = 0; i < roots.length; i += 2) {
+        results.push(await hash(roots[i], (roots[i + 1] || (isBrowser ? new Uint8Array(32) : Buffer.alloc(32)))));
+    }
+    return results;
+};
+
+const hash_key = (key) => hash(key, (isBrowser ? new Uint8Array(16) : Buffer.alloc(16)));
+
+const fromHex = (hex) => {
+    if (hex instanceof Uint8Array || (Buffer && hex instanceof Buffer)) return hex;
+    const hexString = hex.toString().startsWith("0x") ? hex.substring(2) : hex;
+    if (isBrowser) {
+        const bytes = new Uint8Array(hexString.length / 2);
+        for (let i = 0; i < bytes.length; i++) {
+            bytes[i] = parseInt(hexString.substr(i * 2, 2), 16);
+        }
+        return bytes;
+    } else {
+        return Buffer.from(hexString, "hex");
+    }
+};
+
+const concat_buffers = (buffers) => {
+    if (!isBrowser) return Buffer.concat(buffers);
+    let totalLength = 0;
+    for (const b of buffers) totalLength += b.length;
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const b of buffers) {
+        result.set(b, offset);
+        offset += b.length;
+    }
+    return result;
+}
+
+const compare_buffers = (a, b) => {
+    if (!isBrowser) return Buffer.compare(a, b);
+    if (a.length !== b.length) return 1;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return 1;
+    }
+    return 0;
 }
 
 
-function merkle_root_from_branch(gindex, branch, leaf) {
-    let root = leaf, i = 0
+const split_bytes = (bytes, len) => new Array(Math.ceil(bytes.length / len)).fill(0).map((_, i) => bytes.slice(i * len, (i + 1) * len));
+const ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX = 87;
+
+async function calculate_next_sync_committee_root(next_sync_committee) {
+    let roots = await Promise.all(next_sync_committee.pubkeys.map(hash_key));
+    while (roots.length > 1) roots = await hash_roots(roots);
+    return await hash(roots[0], await hash_key(next_sync_committee.aggregate_pubkey));
+}
+
+async function merkle_root_from_branch(gindex, branch, leaf) {
+    let root = leaf, i = 0;
     while (gindex > 1) {
-        root = gindex % 2 ? hash(branch[i++], root) : hash(root, branch[i++])
-        gindex >>= 1
+        root = gindex % 2 ? await hash(branch[i++], root) : await hash(root, branch[i++]);
+        gindex = typeof gindex === 'bigint' ? gindex >> 1n : gindex >> 1;
     }
-    return root
+    return root;
 }
 
 class Node {
-
     constructor(url) {
         this.url = url.endsWith('/') ? url.slice(0, -1) : url;
-        this.req_count = 0
-        this.req_time = 0
+        this.req_count = 0;
+        this.req_time = 0;
     }
+
     async exec(path, query, ssz) {
-
-        let headers = {}
-        if (ssz) headers['Accept'] = 'application/octet-stream'
-        if (query) path += '?' + Object.entries(query).map(([key, value]) => `${key}=${value}`).join('&')
-        const start_time = Date.now()
-        const response = await fetch(this.url + path, { method: 'GET', headers })
+        let headers = {};
+        if (ssz) headers['Accept'] = 'application/octet-stream';
+        if (query) path += '?' + Object.entries(query).map(([key, value]) => `${key}=${value}`).join('&');
+        const start_time = Date.now();
+        const response = await fetch(this.url + path, { method: 'GET', headers });
         if (response.status !== 200) {
-            let txt = await response.text().then(r => r.trim())
+            let txt = await response.text().then(r => r.trim());
             if (txt.startsWith('{') && txt.endsWith('}')) {
-                let json = JSON.parse(txt)
-                if (json.code && json.message) throw new Error(json.message)
-                if (json.title) throw new Error(json.title)
+                let json = JSON.parse(txt);
+                if (json.code && json.message) throw new Error(json.message);
+                if (json.title) throw new Error(json.title);
             }
-            throw new Error(txt)
+            throw new Error(txt);
         }
-        this.req_count += 1
-        this.req_time += Date.now() - start_time
+        this.req_count += 1;
+        this.req_time += Date.now() - start_time;
         if (ssz) {
-            const content_type = response.headers.get('Content-Type')
-            if (content_type.includes('application/octet-stream'))
-                return await response.arrayBuffer()
-            else if (content_type.includes('application/json')) {
-                const json = await response.json()
-                if (json.data || Array.isArray(json)) throw new Error('SSZ requested, but json delivered for ' + path)
-                if (json.code && json.message) throw new Error(json.message + ' ssz requested, but json delivered')
-                throw new Error(`SSZ not supported for ${path} ( ${content_type} )`)
+            const content_type = response.headers.get('Content-Type');
+            if (content_type.includes('application/octet-stream')) {
+                const buffer = await response.arrayBuffer();
+                return isBrowser ? new Uint8Array(buffer) : Buffer.from(buffer);
+            } else if (content_type.includes('application/json')) {
+                const json = await response.json();
+                if (json.data || Array.isArray(json)) throw new Error('SSZ requested, but json delivered for ' + path);
+                if (json.code && json.message) throw new Error(json.message + ' ssz requested, but json delivered');
+                throw new Error(`SSZ not supported for ${path} ( ${content_type} )`);
+            } else {
+                throw new Error(`SSZ not supported for ${path} ( ${content_type} )`);
             }
-
-            else
-                throw new Error(`SSZ not supported for ${path} ( ${content_type} )`)
         }
         return await response.json();
     }
 
     async json(path, query) {
-        return this.exec(path, query, false)
+        return this.exec(path, query, false);
     }
+
     async ssz(path, query) {
-        return this.exec(path, query, true)
+        return this.exec(path, query, true);
     }
 
     get avg_time() {
-        return (this.req_count ? this.req_time / this.req_count : 0).toFixed(2) + ' ms'
-    }
-    get is_file() {
-        return !this.url.startsWith('http://') && !this.url.startsWith('https://')
-    }
-    get file_content() {
-        if (!this.is_file) throw new Error('Not a file')
-        return Buffer.from(readFileSync(this.url))
+        return (this.req_count ? this.req_time / this.req_count : 0).toFixed(2) + ' ms';
     }
 
+    get is_file() {
+        return !isBrowser && !this.url.startsWith('http://') && !this.url.startsWith('https://');
+    }
+
+    get file_content() {
+        if (!this.is_file) throw new Error('Not a file');
+        return fs.readFileSync(this.url);
+    }
 }
 
 async function check_version(node) {
-    const info = await node.json('/eth/v1/node/version')
-    return info.data.version
+    const info = await node.json('/eth/v1/node/version');
+    return info.data.version;
 }
 
 async function check_parent_headers(node) {
-    const head = await node.json('/eth/v1/beacon/headers/head').then(r => r.data)
-    const found = await node.json('/eth/v1/beacon/headers', { parent_root: head.header.message.parent_root }).then(r => r.data)
-    if (!found || found.length !== 1) throw new Error(`Parent header not found: ${head.header.message.parent_root}`)
-    if (found[0].header.message.parent_root !== head.header.message.parent_root) throw new Error(`Parent header mismatch: ${found[0].header.message.parent_root} !== ${head.header.message.parent_root}`)
-    return 'ok'
+    const head = await node.json('/eth/v1/beacon/headers/head').then(r => r.data);
+    const found = await node.json('/eth/v1/beacon/headers', { parent_root: head.header.message.parent_root }).then(r => r.data);
+    if (!found || found.length !== 1) throw new Error(`Parent header not found: ${head.header.message.parent_root}`);
+    if (found[0].header.message.parent_root !== head.header.message.parent_root) throw new Error(`Parent header mismatch: ${found[0].header.message.parent_root} !== ${head.header.message.parent_root}`);
+    return 'ok';
 }
 
 async function check_block_ssz(node) {
-    const head = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header)
-    const block = new DataView(await node.ssz('/eth/v2/beacon/blocks/head'))
-    if (block.length < 8) throw new Error(`Block is too short: ${block.length}`)
-    const offset = block.getUint32(0, true)
-    if (offset > block.length - 4) throw new Error('Invalid offset in ssz block')
-    const slot = Number(block.getBigUint64(offset, true))
-    if (Math.abs(slot - parseInt(head.message.slot)) > 1) throw new Error('Invalid slot in block')
-    return 'ok'
-}
-async function historical_proof(node) {
-    const client = await check_version(node)
-    if (!client.includes('Nimbus') && !client.includes('Lodestar')) throw new Error('not supported')
-    return 'ok'
+    const head = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header);
+    const blockBuffer = await node.ssz('/eth/v2/beacon/blocks/head');
+    const block = new DataView(blockBuffer.buffer, blockBuffer.byteOffset, blockBuffer.byteLength);
+    if (block.byteLength < 8) throw new Error(`Block is too short: ${block.byteLength}`);
+    const offset = block.getUint32(0, true);
+    if (offset > block.byteLength - 4) throw new Error('Invalid offset in ssz block');
+    const slot = Number(block.getBigUint64(offset, true));
+    if (Math.abs(slot - parseInt(head.message.slot)) > 1) throw new Error('Invalid slot in block');
+    return 'ok';
 }
 
+async function historical_proof(node) {
+    const client = await check_version(node);
+    if (!client.includes('Nimbus') && !client.includes('Lodestar')) throw new Error('not supported');
+    return 'ok';
+}
 
 async function check_lcu_json(node) {
-    const slot = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header.message.slot)
-    const period = slot >> 13
+    const slot = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header.message.slot);
+    const period = slot >> 13;
     for (let i = 0; i < 21; i++) {
-        const data = await node.json('/eth/v1/beacon/light_client/updates', { start_period: period - i, count: 1 }).then(r => r[0].data)
-        const sync_root = calculate_next_sync_committee_root(data.next_sync_committee)
-        const state_root_calculated = merkle_root_from_branch(ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX, data.next_sync_committee_branch, sync_root) // we only check electra states
-        const state_root_expected = fromHex(data.attested_header.beacon.state_root)
+        const data = await node.json('/eth/v1/beacon/light_client/updates', { start_period: period - i, count: 1 }).then(r => r[0].data);
+        const sync_root = await calculate_next_sync_committee_root(data.next_sync_committee);
+        const state_root_calculated = await merkle_root_from_branch(ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX, data.next_sync_committee_branch.map(fromHex), sync_root);
+        const state_root_expected = fromHex(data.attested_header.beacon.state_root);
 
-        // check
-        if (Buffer.compare(state_root_calculated, state_root_expected)) throw new Error(`Invalid Merkle Proof : State root mismatch (i: ${i})`)
+        if (compare_buffers(state_root_calculated, state_root_expected) !== 0) throw new Error(`Invalid Merkle Proof : State root mismatch (i: ${i})`);
     }
-
-    return 'ok'
+    return 'ok';
 }
-async function check_lcu_ssz(node) {
-    let data = null
-    if (node.is_file)
-        data = node.file_content
 
-    if (!data) {
-        const slot = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header.message.slot)
-        const period = slot >> 13
-        data = await node.ssz('/eth/v1/beacon/light_client/updates', { start_period: period, count: 1 }).then(r => Buffer.from(r))
+async function check_lcu_ssz(node) {
+    let data = null;
+    if (node.is_file) {
+        data = node.file_content;
+    } else {
+        const slot = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header.message.slot);
+        const period = slot >> 13;
+        data = await node.ssz('/eth/v1/beacon/light_client/updates', { start_period: period, count: 1 });
     }
 
-    function decode_ssz(data) {
-        function read_ssz(bytes, len) {
-            const value = bytes.slice(offset.start, offset.start + len)
-            offset.start += len
-            return value
+    // SSZ decoding logic...
+    // This part is tricky and might need a proper SSZ library to work robustly.
+    // The DataView/Buffer slicing approach is kept for now.
+
+    function decode_ssz(ssz_data) {
+        const view = new DataView(ssz_data.buffer, ssz_data.byteOffset, ssz_data.byteLength);
+
+        let offset = { start: 4 };
+        function read_ssz(len) {
+            const value = ssz_data.slice(offset.start, offset.start + len);
+            offset.start += len;
+            return value;
         }
-        // decode ssz
-        let offset = { start: 4 }
-        const next_sync_committee = read_ssz(data, 513 * 48) // 512 keys + aggregated pubkey (48 bytes)
-        const next_sync_committee_branch = read_ssz(data, 6 * 32) // 6 hashes in the branch ( for electra)  
-        const attested_header = data.slice(data.readUInt32LE(0), data.readUInt32LE(offset.start)) // dynamic object between the offsets
+
+        const next_sync_committee = read_ssz(513 * 48);
+        const next_sync_committee_branch = read_ssz(6 * 32);
+        const attested_header_offset = view.getUint32(0, true);
+        const attested_header_end_offset = view.getUint32(offset.start, true);
+        const attested_header = ssz_data.slice(attested_header_offset, attested_header_end_offset);
+
         return {
-            state_root: attested_header.slice(48, 48 + 32), // just take the stateroot out of the fixed header
+            state_root: attested_header.slice(48, 48 + 32),
             next_sync_committee: {
                 pubkeys: split_bytes(next_sync_committee.slice(0, 512 * 48), 48),
                 aggregate_pubkey: next_sync_committee.slice(512 * 48, 513 * 48)
             },
             next_sync_committee_branch: split_bytes(next_sync_committee_branch, 32)
-        }
+        };
     }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    const update = decode_ssz(data.slice(12, 12 + view.getUint32(0, true)));
 
-    // decode the first chunk, by reading the length from the first 8 bytes and skipping the forkDigest since we expect electra
-    const update = decode_ssz(data.slice(12, 12 + data.slice(0, 8).readUInt32LE(0)))
+    const sync_root = await calculate_next_sync_committee_root(update.next_sync_committee);
+    const state_root_calculated = await merkle_root_from_branch(ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX, update.next_sync_committee_branch, sync_root);
+    const state_root_expected = update.state_root;
 
-    // calculate the state_root
-    const sync_root = calculate_next_sync_committee_root(update.next_sync_committee)
-    const state_root_calculated = merkle_root_from_branch(ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX, update.next_sync_committee_branch, sync_root) // we only check electra states
-    const state_root_expected = update.state_root
+    if (compare_buffers(state_root_calculated, state_root_expected) !== 0) throw new Error("State root mismatch");
 
-    // check
-    if (Buffer.compare(state_root_calculated, state_root_expected)) throw new Error("State root mismatch")
-
-    return 'ok'
+    return 'ok';
 }
 
-
 export async function check_node(url, cb) {
-    const node = new Node(url)
-    const results = []
+    const node = new Node(url);
+    const results = [];
     const checks = node.is_file ? [
         { name: 'light_client_update as ssz', fn: check_lcu_ssz, required: true },
     ] : [
@@ -191,24 +262,20 @@ export async function check_node(url, cb) {
         { name: 'light_client_update as ssz', fn: check_lcu_ssz, required: false },
         { name: 'light_client_update as json', fn: check_lcu_json, required: true },
         { name: 'historical_proof', fn: historical_proof, required: false },
-        { name: 'avg_response_time', fn: node => node.avg_time, required: false },
+        { name: 'avg_response_time', fn: () => node.avg_time, required: false },
         { name: '\ncolibri suitable', fn: () => { if (required_checks_failed.length) throw new Error('required checks failed: ' + required_checks_failed.join(', ')); return 'ok' }, required: false },
+    ];
 
-    ]
-
-    let required_checks_failed = []
+    let required_checks_failed = [];
     for (const check of checks) {
         try {
-            const result = await check.fn(node)
-            results.push({ name: check.name, result, passed: true })
+            const result = await check.fn(node);
+            results.push({ name: check.name, result, passed: true });
         } catch (error) {
-            if (check.required) required_checks_failed.push(check.name)
-            results.push({ name: check.name, result: error.message, passed: false })
+            if (check.required) required_checks_failed.push(check.name);
+            results.push({ name: check.name, result: error.message, passed: false });
         }
-        if (cb) cb(results[results.length - 1], checks)
+        if (cb) cb(results[results.length - 1], checks);
     }
-
-
-
-    return results
+    return results;
 }

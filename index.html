@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beacon Node Check</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        #results {
+            margin-top: 20px;
+            white-space: pre;
+            font-family: monospace;
+        }
+
+        .passed {
+            color: green;
+        }
+
+        .failed {
+            color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Ethereum Beacon Node Checker</h1>
+    <input type="text" id="urlInput" placeholder="Enter beacon node URL(s), comma-separated" size="80">
+    <button id="checkButton">Check Node(s)</button>
+    <div id="results"></div>
+
+    <script type="module">
+        import { check_node } from './src/beacon/index.mjs';
+
+        document.getElementById('checkButton').addEventListener('click', async () => {
+            const urls = document.getElementById('urlInput').value;
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+
+            for (const url of urls.split(',')) {
+                if (!url.trim()) continue;
+
+                resultsDiv.innerHTML += `<h3>Checking ${url.trim()}</h3>`;
+
+                await check_node(url.trim(), (check, checks) => {
+                    const max_name_length = Math.max(...checks.map(r => r.name.length));
+                    const status = check.passed ? '✅' : '❌';
+                    const resultClass = check.passed ? 'passed' : 'failed';
+                    resultsDiv.innerHTML += `<div class="${resultClass}">${check.name.padEnd(max_name_length + 2)}: ${status} ${check.result}</div>`;
+                });
+
+                resultsDiv.innerHTML += `<br/>`;
+            }
+        });
+    </script>
+</body>
+
+</html>
