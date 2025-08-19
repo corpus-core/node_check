@@ -26,4 +26,4 @@ EXPOSE ${PORT}
 
 # Start the http-server using the PORT variable
 # We use shell form here so the variable gets expanded
-CMD npx http-server -p ${PORT} -c-1
+CMD npx http-server -p ${PORT} -c-1 --cors

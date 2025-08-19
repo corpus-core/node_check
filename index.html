@@ -1,62 +1,255 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Beacon Node Check</title>
+    <title>Beacon Node Checker</title>
     <style>
+        :root {
+            --bg-color: #ffffff;
+            --text-color: #212529;
+            --primary-color: #007bff;
+            --border-color: #dee2e6;
+            --input-bg: #f8f9fa;
+            --result-bg: #f8f9fa;
+            --result-border: #e9ecef;
+            --shadow-color: rgba(0,0,0,0.1);
+        }
+
+        html[data-theme='dark'] {
+            --bg-color: #121212;
+            --text-color: #e0e0e0;
+            --primary-color: #bb86fc;
+            --border-color: #444;
+            --input-bg: #1e1e1e;
+            --result-bg: #1e1e1e;
+            --result-border: #333;
+            --shadow-color: rgba(255,255,255,0.1);
+        }
+
         body {
-            font-family: sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
             padding: 20px;
         }
 
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+        
+        .logo-container {
+            display: flex;
+            align-items: center;
+        }
+
+        .logo {
+            width: 50px;
+            height: 50px;
+            margin-right: 15px;
+        }
+        
+        h1 {
+            font-size: 1.75rem;
+            margin: 0;
+        }
+
+        .input-group {
+            display: flex;
+            margin-bottom: 2rem;
+        }
+
+        #urlInput {
+            flex-grow: 1;
+            padding: 10px 15px;
+            font-size: 1rem;
+            border: 1px solid var(--border-color);
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            border-radius: 5px 0 0 5px;
+            outline: none;
+        }
+        
+        #urlInput:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px var(--shadow-color);
+        }
+
+        #checkButton {
+            padding: 10px 20px;
+            font-size: 1rem;
+            background-color: var(--primary-color);
+            color: var(--bg-color);
+            border: 1px solid var(--primary-color);
+            border-radius: 0 5px 5px 0;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        #checkButton:hover {
+            opacity: 0.8;
+        }
+
         #results {
-            margin-top: 20px;
+            font-family: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+            font-size: 0.9rem;
+            background-color: var(--result-bg);
+            border: 1px solid var(--result-border);
+            border-radius: 5px;
+            padding: 15px;
             white-space: pre;
-            font-family: monospace;
+            overflow-x: auto;
+        }
+        
+        .result-block {
+            padding: 10px;
+            border-bottom: 1px solid var(--result-border);
+        }
+        .result-block:last-child {
+            border-bottom: none;
         }
 
-        .passed {
-            color: green;
+        .passed { color: #28a745; }
+        .failed { color: #dc3545; }
+        
+        /* Theme Switcher */
+        .theme-switch-wrapper {
+            display: flex;
+            align-items: center;
         }
-
-        .failed {
-            color: red;
+        .theme-switch {
+            display: inline-block;
+            height: 24px;
+            position: relative;
+            width: 50px;
+            margin-left: 10px;
+        }
+        .theme-switch input {
+            display:none;
+        }
+        .slider {
+            background-color: #ccc;
+            bottom: 0;
+            cursor: pointer;
+            left: 0;
+            position: absolute;
+            right: 0;
+            top: 0;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            background-color: #fff;
+            bottom: 4px;
+            content: "";
+            height: 16px;
+            left: 4px;
+            position: absolute;
+            transition: .4s;
+            width: 16px;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: var(--primary-color);
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
         }
     </style>
 </head>
-
 <body>
-    <h1>Ethereum Beacon Node Checker</h1>
-    <input type="text" id="urlInput" placeholder="Enter beacon node URL(s), comma-separated" size="80">
-    <button id="checkButton">Check Node(s)</button>
-    <div id="results"></div>
+    <div class="container">
+        <header>
+            <div class="logo-container">
+                <img src="/public/logo.png" alt="Logo" class="logo">
+                <h1>Beacon Node Checker</h1>
+            </div>
+            <div class="theme-switch-wrapper">
+                <span>☀️</span>
+                <label class="theme-switch" for="checkbox">
+                    <input type="checkbox" id="checkbox" />
+                    <div class="slider round"></div>
+                </label>
+                <span>🌙</span>
+            </div>
+        </header>
+
+        <div class="input-group">
+            <input type="text" id="urlInput" placeholder="Enter beacon node URL(s), comma-separated">
+            <button id="checkButton">Check Node(s)</button>
+        </div>
+        
+        <div id="results"></div>
+    </div>
 
     <script type="module">
         import { check_node } from './src/beacon/index.mjs';
 
+        // --- Theme Switcher Logic ---
+        const themeSwitcher = document.getElementById('checkbox');
+        const doc = document.documentElement;
+        
+        const setTheme = (theme) => {
+            doc.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            themeSwitcher.checked = theme === 'dark';
+        };
+
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+        const savedTheme = localStorage.getItem('theme');
+
+        if (savedTheme) {
+            setTheme(savedTheme);
+        } else {
+            setTheme(prefersDark.matches ? 'dark' : 'light');
+        }
+
+        themeSwitcher.addEventListener('change', (e) => {
+            setTheme(e.target.checked ? 'dark' : 'light');
+        });
+
+        prefersDark.addEventListener('change', (e) => {
+            if (!localStorage.getItem('theme')) {
+                setTheme(e.matches ? 'dark' : 'light');
+            }
+        });
+
+        // --- Checker Logic ---
         document.getElementById('checkButton').addEventListener('click', async () => {
             const urls = document.getElementById('urlInput').value;
             const resultsDiv = document.getElementById('results');
-            resultsDiv.innerHTML = '';
+            resultsDiv.innerHTML = 'Checking...';
 
+            let finalHtml = '';
             for (const url of urls.split(',')) {
-                if (!url.trim()) continue;
+                const trimmedUrl = url.trim();
+                if (!trimmedUrl) continue;
 
-                resultsDiv.innerHTML += `<h3>Checking ${url.trim()}</h3>`;
-
-                await check_node(url.trim(), (check, checks) => {
+                finalHtml += `<div class="result-block"><h3>Checking ${trimmedUrl}</h3>`;
+                
+                await check_node(trimmedUrl, (check, checks) => {
                     const max_name_length = Math.max(...checks.map(r => r.name.length));
                     const status = check.passed ? '✅' : '❌';
                     const resultClass = check.passed ? 'passed' : 'failed';
-                    resultsDiv.innerHTML += `<div class="${resultClass}">${check.name.padEnd(max_name_length + 2)}: ${status} ${check.result}</div>`;
+                    finalHtml += `<div class="${resultClass}">${check.name.padEnd(max_name_length + 2)}: ${status} ${check.result}</div>`;
                 });
 
-                resultsDiv.innerHTML += `<br/>`;
+                finalHtml += `</div>`;
             }
+            resultsDiv.innerHTML = finalHtml;
         });
     </script>
 </body>
-
 </html>
