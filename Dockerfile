@@ -12,14 +12,18 @@ RUN npm install
 FROM node:18-alpine
 WORKDIR /app
 
+# Set a default port. Can be overridden at runtime.
+ENV PORT 8080
+
 # Copy installed dependencies from the builder stage
 COPY --from=builder /app/node_modules ./node_modules
 
 # Copy the application files
 COPY . .
 
-# Expose port 8080
-EXPOSE 8080
+# Expose the port defined by the variable
+EXPOSE ${PORT}
 
-# Start the http-server
-CMD [ "npx", "http-server", "-p", "8080", "-c-1" ]
+# Start the http-server using the PORT variable
+# We use shell form here so the variable gets expanded
+CMD npx http-server -p ${PORT} -c-1
