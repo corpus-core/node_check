@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 
-import './server.mjs';
-
-/*
 import { check_node } from './beacon/index.mjs'
 
 const url = process.argv.pop()
@@ -22,4 +19,3 @@ for (let node of url.split(',')) {
         console.log(`${check.name.padEnd(max_name_length + 2)}: ${check.passed ? '✅' : '❌'} ${check.result}`)
     })
 }
-*/
