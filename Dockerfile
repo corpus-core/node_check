@@ -24,6 +24,6 @@ COPY . .
 # Expose the port defined by the variable
 EXPOSE ${PORT}
 
-# Start the http-server using the PORT variable
-# We use shell form here so the variable gets expanded
-CMD npx http-server -p ${PORT} -c-1 --cors
+# Start the http-server, serving from the app directory
+# The server will automatically find index.html and the public folder
+CMD npx http-server . -p ${PORT} -c-1 --cors

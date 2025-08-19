@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,7 +14,7 @@
             --input-bg: #f8f9fa;
             --result-bg: #f8f9fa;
             --result-border: #e9ecef;
-            --shadow-color: rgba(0,0,0,0.1);
+            --shadow-color: rgba(0, 0, 0, 0.1);
         }
 
         html[data-theme='dark'] {
@@ -24,7 +25,7 @@
             --input-bg: #1e1e1e;
             --result-bg: #1e1e1e;
             --result-border: #333;
-            --shadow-color: rgba(255,255,255,0.1);
+            --shadow-color: rgba(255, 255, 255, 0.1);
         }
 
         body {
@@ -49,7 +50,7 @@
             align-items: center;
             margin-bottom: 2rem;
         }
-        
+
         .logo-container {
             display: flex;
             align-items: center;
@@ -60,7 +61,7 @@
             height: 50px;
             margin-right: 15px;
         }
-        
+
         h1 {
             font-size: 1.75rem;
             margin: 0;
@@ -81,7 +82,7 @@
             border-radius: 5px 0 0 5px;
             outline: none;
         }
-        
+
         #urlInput:focus {
             border-color: var(--primary-color);
             box-shadow: 0 0 0 2px var(--shadow-color);
@@ -112,23 +113,30 @@
             white-space: pre;
             overflow-x: auto;
         }
-        
+
         .result-block {
             padding: 10px;
             border-bottom: 1px solid var(--result-border);
         }
+
         .result-block:last-child {
             border-bottom: none;
         }
 
-        .passed { color: #28a745; }
-        .failed { color: #dc3545; }
-        
+        .passed {
+            color: #28a745;
+        }
+
+        .failed {
+            color: #dc3545;
+        }
+
         /* Theme Switcher */
         .theme-switch-wrapper {
             display: flex;
             align-items: center;
         }
+
         .theme-switch {
             display: inline-block;
             height: 24px;
@@ -136,9 +144,11 @@
             width: 50px;
             margin-left: 10px;
         }
+
         .theme-switch input {
-            display:none;
+            display: none;
         }
+
         .slider {
             background-color: #ccc;
             bottom: 0;
@@ -150,6 +160,7 @@
             transition: .4s;
             border-radius: 24px;
         }
+
         .slider:before {
             background-color: #fff;
             bottom: 4px;
@@ -161,14 +172,17 @@
             width: 16px;
             border-radius: 50%;
         }
-        input:checked + .slider {
+
+        input:checked+.slider {
             background-color: var(--primary-color);
         }
-        input:checked + .slider:before {
+
+        input:checked+.slider:before {
             transform: translateX(26px);
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -190,7 +204,7 @@
             <input type="text" id="urlInput" placeholder="Enter beacon node URL(s), comma-separated">
             <button id="checkButton">Check Node(s)</button>
         </div>
-        
+
         <div id="results"></div>
     </div>
 
@@ -200,7 +214,7 @@
         // --- Theme Switcher Logic ---
         const themeSwitcher = document.getElementById('checkbox');
         const doc = document.documentElement;
-        
+
         const setTheme = (theme) => {
             doc.setAttribute('data-theme', theme);
             localStorage.setItem('theme', theme);
@@ -238,7 +252,7 @@
                 if (!trimmedUrl) continue;
 
                 finalHtml += `<div class="result-block"><h3>Checking ${trimmedUrl}</h3>`;
-                
+
                 await check_node(trimmedUrl, (check, checks) => {
                     const max_name_length = Math.max(...checks.map(r => r.name.length));
                     const status = check.passed ? '✅' : '❌';
@@ -252,4 +266,5 @@
         });
     </script>
 </body>
+
 </html>
