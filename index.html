@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Beacon Node Checker</title>
+    <title>ETH Node Checker</title>
     <style>
         :root {
             --bg-color: #ffffff;
@@ -72,14 +72,25 @@
             margin-bottom: 2rem;
         }
 
-        #urlInput {
-            flex-grow: 1;
+        #clientType {
             padding: 10px 15px;
             font-size: 1rem;
             border: 1px solid var(--border-color);
             background-color: var(--input-bg);
             color: var(--text-color);
             border-radius: 5px 0 0 5px;
+            outline: none;
+        }
+
+        #urlInput {
+            flex-grow: 1;
+            padding: 10px 15px;
+            font-size: 1rem;
+            border: 1px solid var(--border-color);
+            border-left: 0;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            border-radius: 0;
             outline: none;
         }
 
@@ -188,7 +199,7 @@
         <header>
             <div class="logo-container">
                 <img src="/public/logo.png" alt="Logo" class="logo">
-                <h1>Beacon Node Checker</h1>
+                <h1>ETH Node Checker</h1>
             </div>
             <div class="theme-switch-wrapper">
                 <span>☀️</span>
@@ -201,6 +212,10 @@
         </header>
 
         <div class="input-group">
+            <select id="clientType">
+                <option value="beacon" selected>Beacon</option>
+                <option value="execution">Execution</option>
+            </select>
             <input type="text" id="urlInput" placeholder="Enter beacon node URL(s), comma-separated">
             <button id="checkButton">Check Node(s)</button>
         </div>
@@ -209,7 +224,8 @@
     </div>
 
     <script type="module">
-        import { check_node } from './src/beacon/index.mjs';
+        import { check_beacon_node } from './src/beacon.mjs';
+        import { check_execution_node } from './src/execution.mjs';
 
         // --- Theme Switcher Logic ---
         const themeSwitcher = document.getElementById('checkbox');
@@ -241,8 +257,17 @@
         });
 
         // --- Checker Logic ---
+        document.getElementById('clientType').addEventListener('change', (e) => {
+            const placeholder = e.target.value === 'beacon'
+                ? 'Enter beacon node URL(s), comma-separated'
+                : 'Enter execution node RPC URL(s), comma-separated';
+            document.getElementById('urlInput').placeholder = placeholder;
+        });
+
         document.getElementById('checkButton').addEventListener('click', async () => {
             const urls = document.getElementById('urlInput').value;
+            const clientType = document.getElementById('clientType').value;
+            const check_function = clientType === 'beacon' ? check_beacon_node : check_execution_node;
             const resultsDiv = document.getElementById('results');
             resultsDiv.innerHTML = 'Checking...';
 
@@ -251,9 +276,9 @@
                 const trimmedUrl = url.trim();
                 if (!trimmedUrl) continue;
 
-                finalHtml += `<div class="result-block"><h3>Checking ${trimmedUrl}</h3>`;
+                finalHtml += `<div class="result-block"><h3>Checking ${clientType} node: ${trimmedUrl}</h3>`;
 
-                await check_node(trimmedUrl, (check, checks) => {
+                await check_function(trimmedUrl, (check, checks) => {
                     const max_name_length = Math.max(...checks.map(r => r.name.length));
                     const status = check.passed ? '✅' : '❌';
                     const resultClass = check.passed ? 'passed' : 'failed';

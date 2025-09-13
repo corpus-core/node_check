@@ -250,7 +250,7 @@ async function check_lcu_ssz(node) {
     return 'ok';
 }
 
-export async function check_node(url, cb) {
+export async function check_beacon_node(url, cb) {
     const node = new Node(url);
     const results = [];
     const checks = node.is_file ? [
