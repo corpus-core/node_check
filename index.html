@@ -142,6 +142,10 @@
             color: #dc3545;
         }
 
+        .optional-fail {
+            color: #808080;
+        }
+
         /* Theme Switcher */
         .theme-switch-wrapper {
             display: flex;
@@ -272,21 +276,51 @@
             resultsDiv.innerHTML = 'Checking...';
 
             let finalHtml = '';
-            for (const url of urls.split(',')) {
+            let suitable_nodes_ui = [];
+
+            for (const url of urls.replace(/,/g, ' ').split(/\s+/).filter(u => u)) {
                 const trimmedUrl = url.trim();
                 if (!trimmedUrl) continue;
 
                 finalHtml += `<div class="result-block"><h3>Checking ${clientType} node: ${trimmedUrl}</h3>`;
 
-                await check_function(trimmedUrl, (check, checks) => {
+                const results = await check_function(trimmedUrl, (check, checks) => {
                     const max_name_length = Math.max(...checks.map(r => r.name.length));
-                    const status = check.passed ? '✅' : '❌';
-                    const resultClass = check.passed ? 'passed' : 'failed';
-                    finalHtml += `<div class="${resultClass}">${check.name.padEnd(max_name_length + 2)}: ${status} ${check.result}</div>`;
+                    const check_definition = checks.find(c => c.name === check.name);
+                    const is_required = check_definition ? check_definition.required : false;
+
+                    let status_symbol;
+                    let resultClass;
+
+                    if (check.name === 'colibri suitable') {
+                        status_symbol = check.passed ? '✅' : '❌';
+                        resultClass = check.passed ? 'passed' : 'failed';
+                    } else {
+                        status_symbol = check.passed ? '✅' : (is_required ? '❌' : '⚠️');
+                        resultClass = check.passed ? 'passed' : (is_required ? 'failed' : 'optional-fail');
+                    }
+
+                    finalHtml += `<div class="${resultClass}">${check.name.padEnd(max_name_length + 2)}: ${status_symbol} ${check.result}</div>`;
                 });
+
+                const suitability_check = results.find(r => r.name === 'colibri suitable');
+                if (suitability_check && suitability_check.passed) {
+                    suitable_nodes_ui.push(trimmedUrl);
+                }
 
                 finalHtml += `</div>`;
             }
+
+            finalHtml += `<div class="result-block"><h3>--- Summary ---</h3><div>Suitable ${clientType} nodes that passed all required checks:</div>`;
+            if (suitable_nodes_ui.length > 0) {
+                suitable_nodes_ui.forEach(n => {
+                    finalHtml += `<div>- ${n}</div>`;
+                });
+            } else {
+                finalHtml += `<div>None of the provided nodes are suitable.</div>`;
+            }
+            finalHtml += '</div>';
+
             resultsDiv.innerHTML = finalHtml;
         });
     </script>

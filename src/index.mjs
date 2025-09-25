@@ -32,11 +32,35 @@ if (!check_function) {
 }
 
 
-for (let node of url.split(',')) {
+let suitable_nodes = [];
+for (let node of url.replace(/,/g, ' ').split(/\s+/).filter(u => u)) {
     console.log(`\n### Checking ${type} node ${node}\n`)
 
-    await check_function(node, (check, checks) => {
+    const results = await check_function(node, (check, checks) => {
         const max_name_length = Math.max(...checks.map(r => r.name.length))
-        console.log(`${check.name.padEnd(max_name_length + 2)}: ${check.passed ? '✅' : '❌'} ${check.result}`)
+        const check_definition = checks.find(c => c.name === check.name);
+        const is_required = check_definition ? check_definition.required : false;
+
+        let symbol;
+        if (check.name === 'colibri suitable') {
+            symbol = check.passed ? '✅' : '❌';
+        } else {
+            symbol = check.passed ? '✅' : (is_required ? '❌' : '⚠️');
+        }
+        console.log(`${check.name.padEnd(max_name_length + 2)}: ${symbol} ${check.result}`)
     })
+
+    const suitability_check = results.find(r => r.name === 'colibri suitable');
+    if (suitability_check && suitability_check.passed) {
+        suitable_nodes.push(node);
+    }
 }
+
+console.log(`\n\n--- Summary ---`);
+console.log(`Suitable ${type} nodes that passed all required checks:`);
+if (suitable_nodes.length > 0) {
+    suitable_nodes.forEach(n => console.log(`- ${n}`));
+} else {
+    console.log('None of the provided nodes are suitable.');
+}
+console.log('------------------------------------------');

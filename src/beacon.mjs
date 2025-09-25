@@ -72,6 +72,42 @@ const compare_buffers = (a, b) => {
     return 0;
 }
 
+function format_error_message(message) {
+    if (typeof message !== 'string') return message;
+
+    const trimmed_message = message.trim();
+    if (trimmed_message.startsWith('{') && trimmed_message.endsWith('}')) {
+        try {
+            const json = JSON.parse(trimmed_message);
+            const error_obj = json.error || json;
+            if (error_obj.message) {
+                let msg = error_obj.message;
+                if (error_obj.code) {
+                    msg += ` (code: ${error_obj.code})`;
+                }
+                return msg;
+            }
+        } catch (e) {
+            // Not JSON, continue to HTML stripping
+        }
+    }
+
+    if (message.includes('<')) {
+        let text_to_clean = message;
+        const body_start_index = message.toLowerCase().indexOf('<body');
+        if (body_start_index !== -1) {
+            const body_content_start_index = message.indexOf('>', body_start_index) + 1;
+            const body_end_index = message.toLowerCase().lastIndexOf('</body>');
+            if (body_content_start_index > 0) {
+                text_to_clean = message.substring(body_content_start_index, body_end_index !== -1 ? body_end_index : undefined);
+            }
+        }
+        return text_to_clean.replace(/<[^>]+>/g, ' ').replace(/\s\s+/g, ' ').trim();
+    }
+
+    return message;
+}
+
 
 const split_bytes = (bytes, len) => new Array(Math.ceil(bytes.length / len)).fill(0).map((_, i) => bytes.slice(i * len, (i + 1) * len));
 const ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX = 87;
@@ -103,33 +139,41 @@ class Node {
         if (ssz) headers['Accept'] = 'application/octet-stream';
         if (query) path += '?' + Object.entries(query).map(([key, value]) => `${key}=${value}`).join('&');
         const start_time = Date.now();
-        const response = await fetch(this.url + path, { method: 'GET', headers });
-        if (response.status !== 200) {
-            let txt = await response.text().then(r => r.trim());
-            if (txt.startsWith('{') && txt.endsWith('}')) {
-                let json = JSON.parse(txt);
-                if (json.code && json.message) throw new Error(json.message);
-                if (json.title) throw new Error(json.title);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+        try {
+            const response = await fetch(this.url + path, { method: 'GET', headers, signal: controller.signal });
+            clearTimeout(timeoutId);
+
+            if (response.status !== 200) {
+                let txt = await response.text().then(r => r.trim());
+                throw new Error(format_error_message(txt));
             }
-            throw new Error(txt);
-        }
-        this.req_count += 1;
-        this.req_time += Date.now() - start_time;
-        if (ssz) {
-            const content_type = response.headers.get('Content-Type');
-            if (content_type.includes('application/octet-stream')) {
-                const buffer = await response.arrayBuffer();
-                return isBrowser ? new Uint8Array(buffer) : Buffer.from(buffer);
-            } else if (content_type.includes('application/json')) {
-                const json = await response.json();
-                if (json.data || Array.isArray(json)) throw new Error('SSZ requested, but json delivered for ' + path);
-                if (json.code && json.message) throw new Error(json.message + ' ssz requested, but json delivered');
-                throw new Error(`SSZ not supported for ${path} ( ${content_type} )`);
-            } else {
-                throw new Error(`SSZ not supported for ${path} ( ${content_type} )`);
+            this.req_count += 1;
+            this.req_time += Date.now() - start_time;
+            if (ssz) {
+                const content_type = response.headers.get('Content-Type');
+                if (content_type.includes('application/octet-stream')) {
+                    const buffer = await response.arrayBuffer();
+                    return isBrowser ? new Uint8Array(buffer) : Buffer.from(buffer);
+                } else if (content_type.includes('application/json')) {
+                    const json = await response.json();
+                    if (json.data || Array.isArray(json)) throw new Error('SSZ requested, but json delivered for ' + path);
+                    if (json.code && json.message) throw new Error(format_error_message(json.message + ' ssz requested, but json delivered'));
+                    throw new Error(`SSZ not supported for ${path} ( ${content_type} )`);
+                } else {
+                    throw new Error(`SSZ not supported for ${path} ( ${content_type} )`);
+                }
             }
+            return await response.json();
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                throw new Error('Request timed out after 7 seconds');
+            }
+            throw error;
         }
-        return await response.json();
     }
 
     async json(path, query) {
@@ -263,7 +307,7 @@ export async function check_beacon_node(url, cb) {
         { name: 'light_client_update as json', fn: check_lcu_json, required: true },
         { name: 'historical_proof', fn: historical_proof, required: false },
         { name: 'avg_response_time', fn: () => node.avg_time, required: false },
-        { name: '\ncolibri suitable', fn: () => { if (required_checks_failed.length) throw new Error('required checks failed: ' + required_checks_failed.join(', ')); return 'ok' }, required: false },
+        { name: 'colibri suitable', fn: () => { if (required_checks_failed.length) throw new Error('required checks failed: ' + required_checks_failed.join(', ')); return 'ok' }, required: false },
     ];
 
     let required_checks_failed = [];
