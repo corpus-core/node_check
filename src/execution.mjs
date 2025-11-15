@@ -96,6 +96,37 @@ async function check_client_version(node) {
     return await node.rpc('web3_clientVersion');
 }
 
+async function check_cors(node) {
+    if (isBrowser) {
+        try {
+            await node.rpc('web3_clientVersion');
+            return 'ok';
+        } catch (e) {
+            throw new Error('Request failed, likely due to restrictive CORS policy.');
+        }
+    } else {
+        const response = await fetch(node.url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Origin': 'https://example.com'
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'web3_clientVersion',
+                params: [],
+                id: 999
+            }),
+        });
+        const acao = response.headers.get('access-control-allow-origin');
+        if (acao === '*') {
+            return `ok (*)`;
+        }
+        if (acao) throw new Error(`CORS header is restrictive, only allows: ${acao}`);
+        throw new Error('CORS header (access-control-allow-origin) not found');
+    }
+}
+
 async function check_debug_trace_call(node) {
     // This is a more robust check that specifically tests for the `prestateTracer`.
     // Some RPC providers keep `debug_traceCall` but disable costly tracers.
@@ -103,6 +134,11 @@ async function check_debug_trace_call(node) {
         tracer: 'prestateTracer'
     }]);
     return 'available (with prestateTracer)';
+}
+
+async function check_eth_create_access_list(node) {
+    await node.rpc('eth_createAccessList', [{}, 'latest']);
+    return 'ok';
 }
 
 async function check_eth_get_proof(node) {
@@ -154,7 +190,9 @@ export async function check_execution_node(url, cb) {
     const ARCHIVE_DEPTH = 100000;
     const checks = [
         { name: 'web3_clientVersion', fn: check_client_version, required: true },
+        { name: 'cors_headers', fn: check_cors, required: false },
         { name: 'debug_traceCall', fn: check_debug_trace_call, required: true },
+        { name: 'eth_createAccessList', fn: check_eth_create_access_list, required: false },
         { name: 'eth_getProof', fn: check_eth_get_proof, required: true },
         { name: 'eth_getBlockReceipts', fn: check_eth_get_block_receipts, required: true },
         { name: `archive_check (latest-${ARCHIVE_DEPTH.toLocaleString()})`, fn: (node) => check_historical_transaction_count(node, ARCHIVE_DEPTH), required: false },

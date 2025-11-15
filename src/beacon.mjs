@@ -211,6 +211,80 @@ async function check_parent_headers(node) {
     return 'ok';
 }
 
+async function check_cors(node) {
+    if (isBrowser) {
+        try {
+            await node.json('/eth/v1/node/version');
+            return 'ok';
+        } catch (e) {
+            throw new Error('Request failed, likely due to restrictive CORS policy.');
+        }
+    } else {
+        const response = await fetch(node.url + '/eth/v1/node/version', {
+            method: 'GET',
+            headers: { 'Origin': 'https://example.com' }
+        });
+        const acao = response.headers.get('access-control-allow-origin');
+        if (acao === '*') {
+            return `ok (*)`;
+        }
+        if (acao) throw new Error(`CORS header is restrictive, only allows: ${acao}`);
+        throw new Error('CORS header (access-control-allow-origin) not found');
+    }
+}
+
+async function check_sse_events(node) {
+    const url = node.url + '/eth/v1/events?topics=head';
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            if (isBrowser && typeof es !== 'undefined') {
+                es.close();
+            } else if (!isBrowser && typeof controller !== 'undefined') {
+                controller.abort();
+            }
+            reject(new Error('Timeout: No head event received within 15 seconds.'));
+        }, 15000);
+
+        let es, controller;
+
+        if (isBrowser) {
+            es = new EventSource(url);
+            es.addEventListener('head', () => {
+                clearTimeout(timeout);
+                es.close();
+                resolve('ok');
+            });
+            es.onerror = () => {
+                clearTimeout(timeout);
+                es.close();
+                reject(new Error('Error connecting to event stream.'));
+            };
+        } else { // Node.js
+            controller = new AbortController();
+            fetch(url, { signal: controller.signal }).then(async response => {
+                if (!response.ok) {
+                    clearTimeout(timeout);
+                    return reject(new Error(`Failed to connect to event stream: ${response.statusText}`));
+                }
+                for await (const chunk of response.body) {
+                    if (new TextDecoder().decode(chunk).includes('event: head')) {
+                        clearTimeout(timeout);
+                        controller.abort();
+                        return resolve('ok');
+                    }
+                }
+                clearTimeout(timeout);
+                reject(new Error('Stream ended without a head event.'));
+            }).catch(err => {
+                if (err.name !== 'AbortError') {
+                    clearTimeout(timeout);
+                    reject(err);
+                }
+            });
+        }
+    });
+}
+
 async function check_block_ssz(node) {
     const head = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header);
     const blockBuffer = await node.ssz('/eth/v2/beacon/blocks/head');
@@ -302,6 +376,8 @@ export async function check_beacon_node(url, cb) {
     ] : [
         { name: 'version', fn: check_version, required: true },
         { name: 'headers_by_parent', fn: check_parent_headers, required: true },
+        { name: 'cors_headers', fn: check_cors, required: false },
+        { name: 'sse_events', fn: check_sse_events, required: false },
         { name: 'block_as_ssz', fn: check_block_ssz, required: false },
         { name: 'light_client_update as ssz', fn: check_lcu_ssz, required: false },
         { name: 'light_client_update as json', fn: check_lcu_json, required: true },
