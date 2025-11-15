@@ -26,4 +26,4 @@ EXPOSE ${PORT}
 
 # Start the http-server, serving from the app directory
 # The server will automatically find index.html and the public folder
-CMD npx http-server . -p ${PORT} -c-1 --cors
+CMD ["node", "src/server.mjs"]

@@ -142,6 +142,10 @@
             color: #dc3545;
         }
 
+        .options-group {
+            margin-bottom: 1rem;
+        }
+
         .optional-fail {
             color: #808080;
         }
@@ -224,6 +228,11 @@
             <button id="checkButton">Check Node(s)</button>
         </div>
 
+        <div class="options-group">
+            <input type="checkbox" id="serverSideCheck" checked>
+            <label for="serverSideCheck">Use server-side check (bypasses CORS)</label>
+        </div>
+
         <div id="results"></div>
     </div>
 
@@ -273,55 +282,111 @@
             const clientType = document.getElementById('clientType').value;
             const check_function = clientType === 'beacon' ? check_beacon_node : check_execution_node;
             const resultsDiv = document.getElementById('results');
-            resultsDiv.innerHTML = 'Checking...';
+            resultsDiv.innerHTML = ''; // Clear previous results
 
-            let finalHtml = '';
             let suitable_nodes_ui = [];
+            const useServerSide = document.getElementById('serverSideCheck').checked;
 
-            for (const url of urls.replace(/,/g, ' ').split(/\s+/).filter(u => u)) {
-                const trimmedUrl = url.trim();
-                if (!trimmedUrl) continue;
-
-                finalHtml += `<div class="result-block"><h3>Checking ${clientType} node: ${trimmedUrl}</h3>`;
-
-                const results = await check_function(trimmedUrl, (check, checks) => {
-                    const max_name_length = Math.max(...checks.map(r => r.name.length));
-                    const check_definition = checks.find(c => c.name === check.name);
-                    const is_required = check_definition ? check_definition.required : false;
-
-                    let status_symbol;
-                    let resultClass;
-
-                    if (check.name === 'colibri suitable') {
-                        status_symbol = check.passed ? '✅' : '❌';
-                        resultClass = check.passed ? 'passed' : 'failed';
-                    } else {
-                        status_symbol = check.passed ? '✅' : (is_required ? '❌' : '⚠️');
-                        resultClass = check.passed ? 'passed' : (is_required ? 'failed' : 'optional-fail');
+            if (useServerSide) {
+                resultsDiv.innerHTML = 'Checking nodes on the server... this may take a moment.';
+                try {
+                    const response = await fetch('/check', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ urls, clientType }),
+                    });
+                    if (!response.ok) {
+                        const err = await response.json();
+                        throw new Error(err.error || `HTTP error! status: ${response.status}`);
                     }
+                    const serverResults = await response.json();
 
-                    finalHtml += `<div class="${resultClass}">${check.name.padEnd(max_name_length + 2)}: ${status_symbol} ${check.result}</div>`;
-                });
+                    let finalHtml = '';
+                    for (const result of serverResults) {
+                        finalHtml += `<div class="result-block"><h3>Checking ${clientType} node: ${result.url}</h3>`;
+                        const checks = result.results;
+                        const max_name_length = Math.max(...checks.map(r => r.name.length));
 
-                const suitability_check = results.find(r => r.name === 'colibri suitable');
-                if (suitability_check && suitability_check.passed) {
-                    suitable_nodes_ui.push(trimmedUrl);
+                        for (const check of checks) {
+                            const is_required = ['version', 'headers_by_parent', 'light_client_update as json', 'web3_clientVersion', 'debug_traceCall', 'eth_getProof', 'eth_getBlockReceipts'].includes(check.name);
+                            let status_symbol;
+                            let resultClass;
+
+                            if (check.name === 'colibri suitable') {
+                                status_symbol = check.passed ? '✅' : '❌';
+                                resultClass = check.passed ? 'passed' : 'failed';
+                            } else {
+                                status_symbol = check.passed ? '✅' : (is_required ? '❌' : '⚠️');
+                                resultClass = check.passed ? 'passed' : (is_required ? 'failed' : 'optional-fail');
+                            }
+                            finalHtml += `<div class="${resultClass}">${check.name.padEnd(max_name_length + 2)}: ${status_symbol} ${check.result}</div>`;
+                        }
+
+                        const suitability_check = checks.find(r => r.name === 'colibri suitable');
+                        if (suitability_check && suitability_check.passed) {
+                            suitable_nodes_ui.push(result.url);
+                        }
+                        finalHtml += `</div>`;
+                    }
+                    resultsDiv.innerHTML = finalHtml;
+
+                } catch (error) {
+                    resultsDiv.innerHTML = `<div class="result-block failed">Error during server-side check: ${error.message}</div>`;
                 }
+            } else {
+                let finalHtml = '';
+                for (const url of urls.replace(/,/g, ' ').split(/\s+/).filter(u => u)) {
+                    const trimmedUrl = url.trim();
+                    if (!trimmedUrl) continue;
 
-                finalHtml += `</div>`;
+                    const resultBlock = document.createElement('div');
+                    resultBlock.className = 'result-block';
+                    resultBlock.innerHTML = `<h3>Checking ${clientType} node: ${trimmedUrl}</h3>`;
+                    resultsDiv.appendChild(resultBlock);
+
+                    const results = await check_function(trimmedUrl, (check, checks) => {
+                        const max_name_length = Math.max(...checks.map(r => r.name.length));
+                        const check_definition = checks.find(c => c.name === check.name);
+                        const is_required = check_definition ? check_definition.required : false;
+
+                        let status_symbol;
+                        let resultClass;
+
+                        if (check.name === 'colibri suitable') {
+                            status_symbol = check.passed ? '✅' : '❌';
+                            resultClass = check.passed ? 'passed' : 'failed';
+                        } else {
+                            status_symbol = check.passed ? '✅' : (is_required ? '❌' : '⚠️');
+                            resultClass = check.passed ? 'passed' : (is_required ? 'failed' : 'optional-fail');
+                        }
+
+                        const checkDiv = document.createElement('div');
+                        checkDiv.className = resultClass;
+                        checkDiv.textContent = `${check.name.padEnd(max_name_length + 2)}: ${status_symbol} ${check.result}`;
+                        resultBlock.appendChild(checkDiv);
+                    });
+
+                    const suitability_check = results.find(r => r.name === 'colibri suitable');
+                    if (suitability_check && suitability_check.passed) {
+                        suitable_nodes_ui.push(trimmedUrl);
+                    }
+                }
             }
 
-            finalHtml += `<div class="result-block"><h3>--- Summary ---</h3><div>Suitable ${clientType} nodes that passed all required checks:</div>`;
+            const summaryBlock = document.createElement('div');
+            summaryBlock.className = 'result-block';
+            let summaryHtml = `<h3>--- Summary ---</h3><div>Suitable ${clientType} nodes that passed all required checks:</div>`;
             if (suitable_nodes_ui.length > 0) {
                 suitable_nodes_ui.forEach(n => {
-                    finalHtml += `<div>- ${n}</div>`;
+                    summaryHtml += `<div>- ${n}</div>`;
                 });
             } else {
-                finalHtml += `<div>None of the provided nodes are suitable.</div>`;
+                summaryHtml += `<div>None of the provided nodes are suitable.</div>`;
             }
-            finalHtml += '</div>';
-
-            resultsDiv.innerHTML = finalHtml;
+            summaryBlock.innerHTML = summaryHtml;
+            resultsDiv.appendChild(summaryBlock);
         });
     </script>
 </body>
