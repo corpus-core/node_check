@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { check_beacon_node } from './beacon.mjs';
 import { check_execution_node } from './execution.mjs';
+import { check_colibri_node } from './prover.mjs';
 import { detectNodeType } from './detectNodeType.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +16,12 @@ app.use(express.json());
 
 // Serve static files from the project root
 app.use(express.static(path.join(__dirname, '..')));
+
+const CHECK_MAP = {
+    beacon: check_beacon_node,
+    execution: check_execution_node,
+    colibri: check_colibri_node,
+};
 
 app.post('/check', async (req, res) => {
     const { urls } = req.body;
@@ -30,7 +37,10 @@ app.post('/check', async (req, res) => {
             if (!trimmedUrl) continue;
 
             const { type, url: normalizedUrl } = await detectNodeType(trimmedUrl);
-            const check_function = type === 'beacon' ? check_beacon_node : check_execution_node;
+            const check_function = CHECK_MAP[type];
+            if (!check_function) {
+                throw new Error(`Unsupported node type detected: ${type}`);
+            }
             const results = await check_function(normalizedUrl);
             all_results.push({ url: trimmedUrl, type, results });
         }

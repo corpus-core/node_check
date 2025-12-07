@@ -2,6 +2,7 @@
 
 import { check_beacon_node } from './beacon.mjs'
 import { check_execution_node } from './execution.mjs'
+import { check_colibri_node } from './prover.mjs'
 import { detectNodeType } from './detectNodeType.mjs'
 
 const args = process.argv.slice(2)
@@ -33,6 +34,7 @@ if (!nodes.length) {
 const CHECK_MAP = {
     beacon: check_beacon_node,
     execution: check_execution_node,
+    colibri: check_colibri_node,
 }
 
 const suitable_nodes = []

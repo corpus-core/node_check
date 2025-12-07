@@ -226,6 +226,7 @@
     <script type="module">
         import { check_beacon_node } from './src/beacon.mjs';
         import { check_execution_node } from './src/execution.mjs';
+        import { check_colibri_node } from './src/prover.mjs';
         import { detectNodeType } from './src/detectNodeType.mjs';
 
         // --- Theme Switcher Logic ---
@@ -258,6 +259,12 @@
         });
 
         // --- Checker Logic ---
+        const CHECK_FUNCTIONS = {
+            beacon: check_beacon_node,
+            execution: check_execution_node,
+            colibri: check_colibri_node,
+        };
+
         const parseUrls = (value) => value
             .replace(/,/g, ' ')
             .split(/\s+/)
@@ -306,7 +313,7 @@
                         }
 
                         for (const check of checks) {
-                            const is_required = ['version', 'headers_by_parent', 'light_client_update as json', 'web3_clientVersion', 'debug_traceCall', 'eth_getProof', 'eth_getBlockReceipts'].includes(check.name);
+                            const is_required = ['version', 'headers_by_parent', 'light_client_update as json', 'web3_clientVersion', 'debug_traceCall', 'eth_getProof', 'eth_getBlockReceipts', 'proof_eth_blockNumber (non-zk)', 'proof_eth_blockNumber (zk)'].includes(check.name);
                             let status_symbol;
                             let resultClass;
 
@@ -340,7 +347,10 @@
 
                     try {
                         const { type, url: normalizedUrl } = await detectNodeType(url);
-                        const check_function = type === 'beacon' ? check_beacon_node : check_execution_node;
+                        const check_function = CHECK_FUNCTIONS[type];
+                        if (!check_function) {
+                            throw new Error(`Unsupported node type detected: ${type}`);
+                        }
                         resultBlock.innerHTML = `<h3>Checking ${type} node: ${url}</h3>`;
 
                         const results = await check_function(normalizedUrl, (check, checks) => {

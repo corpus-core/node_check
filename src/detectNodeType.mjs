@@ -74,23 +74,38 @@ async function probeExecution(url) {
     throw new Error('Unexpected RPC response');
 }
 
+async function probeColibri(url) {
+    const response = await fetchWithTimeout(`${url}/version`, { method: 'GET' });
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+    const json = await response.json();
+    if (!json || typeof json.vendor !== 'string') {
+        throw new Error('Invalid version response');
+    }
+    if (!json.vendor.toLowerCase().includes('colibri')) {
+        throw new Error(`Unexpected vendor: ${json.vendor}`);
+    }
+    return 'colibri';
+}
+
 export async function detectNodeType(rawUrl) {
     const normalizedUrl = normalizeUrl(rawUrl);
-    const [beaconResult, executionResult] = await Promise.allSettled([
-        probeBeacon(normalizedUrl),
-        probeExecution(normalizedUrl)
-    ]);
+    const probes = [
+        { type: 'beacon', fn: () => probeBeacon(normalizedUrl) },
+        { type: 'execution', fn: () => probeExecution(normalizedUrl) },
+        { type: 'colibri', fn: () => probeColibri(normalizedUrl) },
+    ];
 
-    if (beaconResult.status === 'fulfilled') {
-        return { type: 'beacon', url: normalizedUrl };
+    const results = await Promise.allSettled(probes.map((probe) => probe.fn()));
+
+    for (let i = 0; i < probes.length; i++) {
+        if (results[i].status === 'fulfilled') {
+            return { type: probes[i].type, url: normalizedUrl };
+        }
     }
-    if (executionResult.status === 'fulfilled') {
-        return { type: 'execution', url: normalizedUrl };
-    }
 
-    const beaconError = describeError(beaconResult.reason);
-    const executionError = describeError(executionResult.reason);
-
-    throw new Error(`Unable to detect node type (Beacon: ${beaconError}, Execution: ${executionError})`);
+    const messages = probes.map((probe, index) => `${probe.type}: ${describeError(results[index].reason)}`).join(', ');
+    throw new Error(`Unable to detect node type (${messages})`);
 }
 
