@@ -72,25 +72,14 @@
             margin-bottom: 2rem;
         }
 
-        #clientType {
+        #urlInput {
+            flex-grow: 1;
             padding: 10px 15px;
             font-size: 1rem;
             border: 1px solid var(--border-color);
             background-color: var(--input-bg);
             color: var(--text-color);
             border-radius: 5px 0 0 5px;
-            outline: none;
-        }
-
-        #urlInput {
-            flex-grow: 1;
-            padding: 10px 15px;
-            font-size: 1rem;
-            border: 1px solid var(--border-color);
-            border-left: 0;
-            background-color: var(--input-bg);
-            color: var(--text-color);
-            border-radius: 0;
             outline: none;
         }
 
@@ -219,12 +208,10 @@
             </div>
         </header>
 
+        <p>Enter the RPC or Beacon endpoint you want to verify. The tool will detect whether it is a consensus or
+            execution node automatically.</p>
         <div class="input-group">
-            <select id="clientType">
-                <option value="beacon" selected>Beacon</option>
-                <option value="execution">Execution</option>
-            </select>
-            <input type="text" id="urlInput" placeholder="Enter beacon node URL(s), comma-separated">
+            <input type="text" id="urlInput" placeholder="Enter node URL(s), comma-separated">
             <button id="checkButton">Check Node(s)</button>
         </div>
 
@@ -239,6 +226,7 @@
     <script type="module">
         import { check_beacon_node } from './src/beacon.mjs';
         import { check_execution_node } from './src/execution.mjs';
+        import { detectNodeType } from './src/detectNodeType.mjs';
 
         // --- Theme Switcher Logic ---
         const themeSwitcher = document.getElementById('checkbox');
@@ -270,19 +258,22 @@
         });
 
         // --- Checker Logic ---
-        document.getElementById('clientType').addEventListener('change', (e) => {
-            const placeholder = e.target.value === 'beacon'
-                ? 'Enter beacon node URL(s), comma-separated'
-                : 'Enter execution node RPC URL(s), comma-separated';
-            document.getElementById('urlInput').placeholder = placeholder;
-        });
+        const parseUrls = (value) => value
+            .replace(/,/g, ' ')
+            .split(/\s+/)
+            .map(u => u.trim())
+            .filter(Boolean);
 
         document.getElementById('checkButton').addEventListener('click', async () => {
-            const urls = document.getElementById('urlInput').value;
-            const clientType = document.getElementById('clientType').value;
-            const check_function = clientType === 'beacon' ? check_beacon_node : check_execution_node;
+            const urlsInput = document.getElementById('urlInput').value;
+            const urlList = parseUrls(urlsInput);
             const resultsDiv = document.getElementById('results');
             resultsDiv.innerHTML = ''; // Clear previous results
+
+            if (!urlList.length) {
+                resultsDiv.innerHTML = '<div class="result-block failed">Please enter at least one URL.</div>';
+                return;
+            }
 
             let suitable_nodes_ui = [];
             const useServerSide = document.getElementById('serverSideCheck').checked;
@@ -295,7 +286,7 @@
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ urls, clientType }),
+                        body: JSON.stringify({ urls: urlsInput }),
                     });
                     if (!response.ok) {
                         const err = await response.json();
@@ -305,9 +296,14 @@
 
                     let finalHtml = '';
                     for (const result of serverResults) {
-                        finalHtml += `<div class="result-block"><h3>Checking ${clientType} node: ${result.url}</h3>`;
-                        const checks = result.results;
-                        const max_name_length = Math.max(...checks.map(r => r.name.length));
+                        const nodeLabel = result.type ? `${result.type} node` : 'node';
+                        finalHtml += `<div class="result-block"><h3>Checking ${nodeLabel}: ${result.url}</h3>`;
+                        const checks = Array.isArray(result.results) ? result.results : [];
+                        const max_name_length = checks.length ? Math.max(...checks.map(r => r.name.length)) : 0;
+
+                        if (!checks.length && result.error) {
+                            finalHtml += `<div class="failed">Error: ${result.error}</div>`;
+                        }
 
                         for (const check of checks) {
                             const is_required = ['version', 'headers_by_parent', 'light_client_update as json', 'web3_clientVersion', 'debug_traceCall', 'eth_getProof', 'eth_getBlockReceipts'].includes(check.name);
@@ -326,7 +322,7 @@
 
                         const suitability_check = checks.find(r => r.name === 'colibri suitable');
                         if (suitability_check && suitability_check.passed) {
-                            suitable_nodes_ui.push(result.url);
+                            suitable_nodes_ui.push({ url: result.url, type: result.type });
                         }
                         finalHtml += `</div>`;
                     }
@@ -334,53 +330,58 @@
 
                 } catch (error) {
                     resultsDiv.innerHTML = `<div class="result-block failed">Error during server-side check: ${error.message}</div>`;
+                    return;
                 }
             } else {
-                let finalHtml = '';
-                for (const url of urls.replace(/,/g, ' ').split(/\s+/).filter(u => u)) {
-                    const trimmedUrl = url.trim();
-                    if (!trimmedUrl) continue;
-
+                for (const url of urlList) {
                     const resultBlock = document.createElement('div');
                     resultBlock.className = 'result-block';
-                    resultBlock.innerHTML = `<h3>Checking ${clientType} node: ${trimmedUrl}</h3>`;
                     resultsDiv.appendChild(resultBlock);
 
-                    const results = await check_function(trimmedUrl, (check, checks) => {
-                        const max_name_length = Math.max(...checks.map(r => r.name.length));
-                        const check_definition = checks.find(c => c.name === check.name);
-                        const is_required = check_definition ? check_definition.required : false;
+                    try {
+                        const { type, url: normalizedUrl } = await detectNodeType(url);
+                        const check_function = type === 'beacon' ? check_beacon_node : check_execution_node;
+                        resultBlock.innerHTML = `<h3>Checking ${type} node: ${url}</h3>`;
 
-                        let status_symbol;
-                        let resultClass;
+                        const results = await check_function(normalizedUrl, (check, checks) => {
+                            const max_name_length = Math.max(...checks.map(r => r.name.length));
+                            const check_definition = checks.find(c => c.name === check.name);
+                            const is_required = check_definition ? check_definition.required : false;
 
-                        if (check.name === 'colibri suitable') {
-                            status_symbol = check.passed ? '✅' : '❌';
-                            resultClass = check.passed ? 'passed' : 'failed';
-                        } else {
-                            status_symbol = check.passed ? '✅' : (is_required ? '❌' : '⚠️');
-                            resultClass = check.passed ? 'passed' : (is_required ? 'failed' : 'optional-fail');
+                            let status_symbol;
+                            let resultClass;
+
+                            if (check.name === 'colibri suitable') {
+                                status_symbol = check.passed ? '✅' : '❌';
+                                resultClass = check.passed ? 'passed' : 'failed';
+                            } else {
+                                status_symbol = check.passed ? '✅' : (is_required ? '❌' : '⚠️');
+                                resultClass = check.passed ? 'passed' : (is_required ? 'failed' : 'optional-fail');
+                            }
+
+                            const checkDiv = document.createElement('div');
+                            checkDiv.className = resultClass;
+                            checkDiv.textContent = `${check.name.padEnd(max_name_length + 2)}: ${status_symbol} ${check.result}`;
+                            resultBlock.appendChild(checkDiv);
+                        });
+
+                        const suitability_check = results.find(r => r.name === 'colibri suitable');
+                        if (suitability_check && suitability_check.passed) {
+                            suitable_nodes_ui.push({ url, type });
                         }
-
-                        const checkDiv = document.createElement('div');
-                        checkDiv.className = resultClass;
-                        checkDiv.textContent = `${check.name.padEnd(max_name_length + 2)}: ${status_symbol} ${check.result}`;
-                        resultBlock.appendChild(checkDiv);
-                    });
-
-                    const suitability_check = results.find(r => r.name === 'colibri suitable');
-                    if (suitability_check && suitability_check.passed) {
-                        suitable_nodes_ui.push(trimmedUrl);
+                    } catch (error) {
+                        resultBlock.innerHTML += `<div class="failed">Error: ${error.message}</div>`;
                     }
                 }
             }
 
             const summaryBlock = document.createElement('div');
             summaryBlock.className = 'result-block';
-            let summaryHtml = `<h3>--- Summary ---</h3><div>Suitable ${clientType} nodes that passed all required checks:</div>`;
+            let summaryHtml = `<h3>--- Summary ---</h3><div>Suitable nodes that passed all required checks:</div>`;
             if (suitable_nodes_ui.length > 0) {
-                suitable_nodes_ui.forEach(n => {
-                    summaryHtml += `<div>- ${n}</div>`;
+                suitable_nodes_ui.forEach(({ url, type }) => {
+                    const label = type ? `[${type}]` : '[unknown]';
+                    summaryHtml += `<div>- ${label} ${url}</div>`;
                 });
             } else {
                 summaryHtml += `<div>None of the provided nodes are suitable.</div>`;

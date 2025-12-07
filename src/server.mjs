@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { check_beacon_node } from './beacon.mjs';
 import { check_execution_node } from './execution.mjs';
+import { detectNodeType } from './detectNodeType.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,21 +17,22 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '..')));
 
 app.post('/check', async (req, res) => {
-    const { urls, clientType } = req.body;
-    if (!urls || !clientType) {
-        return res.status(400).json({ error: 'Missing urls or clientType' });
+    const { urls } = req.body;
+    if (!urls) {
+        return res.status(400).json({ error: 'Missing urls' });
     }
 
-    const check_function = clientType === 'beacon' ? check_beacon_node : check_execution_node;
-    let all_results = [];
+    const all_results = [];
 
     try {
         for (const url of urls.replace(/,/g, ' ').split(/\s+/).filter(u => u)) {
             const trimmedUrl = url.trim();
             if (!trimmedUrl) continue;
 
-            const results = await check_function(trimmedUrl);
-            all_results.push({ url: trimmedUrl, results });
+            const { type, url: normalizedUrl } = await detectNodeType(trimmedUrl);
+            const check_function = type === 'beacon' ? check_beacon_node : check_execution_node;
+            const results = await check_function(normalizedUrl);
+            all_results.push({ url: trimmedUrl, type, results });
         }
         res.json(all_results);
     } catch (error) {
