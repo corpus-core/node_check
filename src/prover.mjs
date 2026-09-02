@@ -91,6 +91,7 @@ class ColibriNode {
             body: JSON.stringify({
                 method: 'eth_blockNumber',
                 params: [],
+                version: 196608,
                 zk_proof,
             }),
         });
