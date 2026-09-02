@@ -2,7 +2,17 @@
   "name": "node_check",
   "version": "1.0.0",
   "description": "checker script to test features of beacon and rpc-nodes",
-  "main": "index.js",
+  "type": "module",
+  "main": "./src/lib.mjs",
+  "exports": {
+    ".": "./src/lib.mjs"
+  },
+  "files": [
+    "src"
+  ],
+  "bin": {
+    "node-check": "./src/index.mjs"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

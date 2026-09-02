@@ -136,6 +136,14 @@ async function check_debug_trace_call(node) {
     return 'available (with prestateTracer)';
 }
 
+async function check_debug_get_raw_block(node) {
+    const raw = await node.rpc('debug_getRawBlock', ['latest']);
+    if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]+$/.test(raw) || raw.length <= 2) {
+        throw new Error('Response is not a hex-encoded raw block');
+    }
+    return `ok (${(raw.length - 2) / 2} bytes)`;
+}
+
 async function check_eth_create_access_list(node) {
     await node.rpc('eth_createAccessList', [{}, 'latest']);
     return 'ok';
@@ -192,6 +200,7 @@ export async function check_execution_node(url, cb) {
         { name: 'web3_clientVersion', fn: check_client_version, required: true },
         { name: 'cors_headers', fn: check_cors, required: false },
         { name: 'debug_traceCall', fn: check_debug_trace_call, required: true },
+        { name: 'debug_getRawBlock', fn: check_debug_get_raw_block, required: true },
         { name: 'eth_createAccessList', fn: check_eth_create_access_list, required: false },
         { name: 'eth_getProof', fn: check_eth_get_proof, required: true },
         { name: 'eth_getBlockReceipts', fn: check_eth_get_block_receipts, required: true },

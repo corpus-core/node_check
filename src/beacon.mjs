@@ -111,6 +111,11 @@ function format_error_message(message) {
 
 const split_bytes = (bytes, len) => new Array(Math.ceil(bytes.length / len)).fill(0).map((_, i) => bytes.slice(i * len, (i + 1) * len));
 const ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX = 87;
+const GLOAS_NEXT_SYNC_COMMITTEE_GINDEX = 2946;
+const NEXT_SYNC_COMMITTEE_GINDEXES = [
+    { name: 'electra', gindex: ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX },
+    { name: 'gloas', gindex: GLOAS_NEXT_SYNC_COMMITTEE_GINDEX },
+];
 
 async function calculate_next_sync_committee_root(next_sync_committee) {
     let roots = await Promise.all(next_sync_committee.pubkeys.map(hash_key));
@@ -121,10 +126,23 @@ async function calculate_next_sync_committee_root(next_sync_committee) {
 async function merkle_root_from_branch(gindex, branch, leaf) {
     let root = leaf, i = 0;
     while (gindex > 1) {
+        if (i >= branch.length) throw new Error('Merkle branch too short for gindex');
         root = gindex % 2 ? await hash(branch[i++], root) : await hash(root, branch[i++]);
         gindex = typeof gindex === 'bigint' ? gindex >> 1n : gindex >> 1;
     }
     return root;
+}
+
+async function verify_next_sync_committee_proof(branch, leaf, expected_root) {
+    for (const { name, gindex } of NEXT_SYNC_COMMITTEE_GINDEXES) {
+        try {
+            const calculated = await merkle_root_from_branch(gindex, branch, leaf);
+            if (compare_buffers(calculated, expected_root) === 0) return name;
+        } catch {
+            // Wrong fork: branch length does not match this gindex.
+        }
+    }
+    throw new Error('Invalid Merkle Proof : State root mismatch');
 }
 
 class Node {
@@ -306,15 +324,22 @@ async function historical_proof(node) {
 async function check_lcu_json(node) {
     const slot = await node.json('/eth/v1/beacon/headers/head').then(r => r.data.header.message.slot);
     const period = slot >> 13;
+    const forks = new Set();
     for (let i = 0; i < 21; i++) {
         const data = await node.json('/eth/v1/beacon/light_client/updates', { start_period: period - i, count: 1 }).then(r => r[0].data);
         const sync_root = await calculate_next_sync_committee_root(data.next_sync_committee);
-        const state_root_calculated = await merkle_root_from_branch(ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX, data.next_sync_committee_branch.map(fromHex), sync_root);
         const state_root_expected = fromHex(data.attested_header.beacon.state_root);
-
-        if (compare_buffers(state_root_calculated, state_root_expected) !== 0) throw new Error(`Invalid Merkle Proof : State root mismatch (i: ${i})`);
+        try {
+            forks.add(await verify_next_sync_committee_proof(
+                data.next_sync_committee_branch.map(fromHex),
+                sync_root,
+                state_root_expected
+            ));
+        } catch {
+            throw new Error(`Invalid Merkle Proof : State root mismatch (i: ${i})`);
+        }
     }
-    return 'ok';
+    return `ok (${[...forks].join(', ')})`;
 }
 
 async function check_lcu_ssz(node) {
@@ -360,12 +385,13 @@ async function check_lcu_ssz(node) {
     const update = decode_ssz(data.slice(12, 12 + view.getUint32(0, true)));
 
     const sync_root = await calculate_next_sync_committee_root(update.next_sync_committee);
-    const state_root_calculated = await merkle_root_from_branch(ELECTRA_NEXT_SYNC_COMMITTEE_GINDEX, update.next_sync_committee_branch, sync_root);
-    const state_root_expected = update.state_root;
+    const fork = await verify_next_sync_committee_proof(
+        update.next_sync_committee_branch,
+        sync_root,
+        update.state_root
+    );
 
-    if (compare_buffers(state_root_calculated, state_root_expected) !== 0) throw new Error("State root mismatch");
-
-    return 'ok';
+    return `ok (${fork})`;
 }
 
 export async function check_beacon_node(url, cb) {
